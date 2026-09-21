@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>chess-master</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cm-chessboard@8.7.11/assets/chessboard.css" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="top">
+        <p class="kicker">chess-master</p>
+        <h1>Replay a game</h1>
+        <p class="lede">Paste a Lichess URL. The API fetches the PGN, then you step through the board.</p>
+      </header>
+
+      <form id="load-form" class="load">
+        <label for="lichess-url">Lichess URL</label>
+        <div class="row">
+          <input
+            id="lichess-url"
+            name="lichessUrl"
+            type="url"
+            placeholder="https://lichess.org/abcdefgh"
+            autocomplete="off"
+          />
+          <button type="submit">Load</button>
+        </div>
+        <details open>
+          <summary>Or paste PGN</summary>
+          <textarea id="pgn-input" rows="6" placeholder='[White "Alice"]...'></textarea>
+        </details>
+        <p id="status" class="status" role="status"></p>
+      </form>
+
+      <section class="stage" hidden id="stage">
+        <div class="meta">
+          <h2 id="players">White vs Black</h2>
+          <p id="game-info"></p>
+        </div>
+        <div class="play">
+          <div id="board" class="board"></div>
+          <ol id="moves" class="moves"></ol>
+        </div>
+        <div class="controls">
+          <button type="button" id="btn-start" aria-label="First move">«</button>
+          <button type="button" id="btn-prev" aria-label="Previous move">‹</button>
+          <span id="ply-label">0 / 0</span>
+          <button type="button" id="btn-next" aria-label="Next move">›</button>
+          <button type="button" id="btn-end" aria-label="Last move">»</button>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

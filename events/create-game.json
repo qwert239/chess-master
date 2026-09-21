@@ -1,0 +1,18 @@
+{
+  "body": "{\"lichessUrl\": \"https://lichess.org/abcdefgh\"}",
+  "resource": "/games",
+  "path": "/games",
+  "httpMethod": "POST",
+  "isBase64Encoded": false,
+  "pathParameters": null,
+  "queryStringParameters": null,
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "requestContext": {
+    "httpMethod": "POST",
+    "path": "/Prod/games",
+    "resourcePath": "/games",
+    "stage": "Prod"
+  }
+}

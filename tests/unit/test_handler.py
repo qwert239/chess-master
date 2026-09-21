@@ -1,72 +1,128 @@
 import json
+from unittest.mock import patch
+from urllib.error import HTTPError
 
 import pytest
 
-from hello_world import app
+from src import app
 
 
-@pytest.fixture()
-def apigw_event():
-    """ Generates API GW Event"""
+SAMPLE_PGN = """[Event "Casual game"]
+[White "Alice"]
+[Black "Bob"]
+[Result "1-0"]
 
-    return {
-        "body": '{ "test": "body"}',
-        "resource": "/{proxy+}",
-        "requestContext": {
-            "resourceId": "123456",
-            "apiId": "1234567890",
-            "resourcePath": "/{proxy+}",
-            "httpMethod": "POST",
-            "requestId": "c6af9ac6-7b61-11e6-9a41-93e8deadbeef",
-            "accountId": "123456789012",
-            "identity": {
-                "apiKey": "",
-                "userArn": "",
-                "cognitoAuthenticationType": "",
-                "caller": "",
-                "userAgent": "Custom User Agent String",
-                "user": "",
-                "cognitoIdentityPoolId": "",
-                "cognitoIdentityId": "",
-                "cognitoAuthenticationProvider": "",
-                "sourceIp": "127.0.0.1",
-                "accountId": "",
-            },
-            "stage": "prod",
-        },
-        "queryStringParameters": {"foo": "bar"},
-        "headers": {
-            "Via": "1.1 08f323deadbeefa7af34d5feb414ce27.cloudfront.net (CloudFront)",
-            "Accept-Language": "en-US,en;q=0.8",
-            "CloudFront-Is-Desktop-Viewer": "true",
-            "CloudFront-Is-SmartTV-Viewer": "false",
-            "CloudFront-Is-Mobile-Viewer": "false",
-            "X-Forwarded-For": "127.0.0.1, 127.0.0.2",
-            "CloudFront-Viewer-Country": "US",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Upgrade-Insecure-Requests": "1",
-            "X-Forwarded-Port": "443",
-            "Host": "1234567890.execute-api.us-east-1.amazonaws.com",
-            "X-Forwarded-Proto": "https",
-            "X-Amz-Cf-Id": "aaaaaaaaaae3VYQb9jd-nvCd-de396Uhbp027Y2JvkCPNLmGJHqlaA==",
-            "CloudFront-Is-Tablet-Viewer": "false",
-            "Cache-Control": "max-age=0",
-            "User-Agent": "Custom User Agent String",
-            "CloudFront-Forwarded-Proto": "https",
-            "Accept-Encoding": "gzip, deflate, sdch",
-        },
-        "pathParameters": {"proxy": "/examplepath"},
+1. e4 e5 2. Nf3 Nc6 1-0
+"""
+
+
+@pytest.fixture(autouse=True)
+def clear_games():
+    app.GAMES.clear()
+    yield
+    app.GAMES.clear()
+
+
+def test_parse_lichess_game_id():
+    assert app.parse_lichess_game_id("https://lichess.org/abcdefgh") == "abcdefgh"
+    assert app.parse_lichess_game_id("https://www.lichess.org/abcdefgh/white") == "abcdefgh"
+    assert app.parse_lichess_game_id("https://lichess.org/game/export/abcdefgh") == "abcdefgh"
+
+
+def test_parse_lichess_game_id_rejects_other_hosts():
+    with pytest.raises(app.ClientError) as exc:
+        app.parse_lichess_game_id("https://chess.com/abcdefgh")
+    assert exc.value.status == 400
+
+
+def test_create_game_from_pgn():
+    event = {
         "httpMethod": "POST",
-        "stageVariables": {"baz": "qux"},
-        "path": "/examplepath",
+        "resource": "/games",
+        "body": json.dumps({"pgn": SAMPLE_PGN}),
     }
-
-
-def test_lambda_handler(apigw_event):
-
-    ret = app.lambda_handler(apigw_event, "")
+    ret = app.lambda_handler(event, None)
     data = json.loads(ret["body"])
 
+    assert ret["statusCode"] == 201
+    assert data["status"] == "imported"
+    assert data["source"] == "pgn"
+    assert data["white"] == "Alice"
+    assert data["black"] == "Bob"
+    assert data["pgn"].startswith("[Event")
+    assert data["id"] in app.GAMES
+
+
+def test_get_game_after_create():
+    created = json.loads(
+        app.lambda_handler(
+            {
+                "httpMethod": "POST",
+                "resource": "/games",
+                "body": json.dumps({"pgn": SAMPLE_PGN}),
+            },
+            None,
+        )["body"]
+    )
+    ret = app.lambda_handler(
+        {
+            "httpMethod": "GET",
+            "resource": "/games/{id}",
+            "pathParameters": {"id": created["id"]},
+        },
+        None,
+    )
+    data = json.loads(ret["body"])
     assert ret["statusCode"] == 200
-    assert "message" in ret["body"]
-    assert data["message"] == "hello world"
+    assert data["id"] == created["id"]
+    assert data["pgn"] == created["pgn"]
+
+
+def test_get_game_missing():
+    ret = app.lambda_handler(
+        {
+            "httpMethod": "GET",
+            "resource": "/games/{id}",
+            "pathParameters": {"id": "missing1"},
+        },
+        None,
+    )
+    assert ret["statusCode"] == 404
+
+
+@patch("src.app.urlopen")
+def test_create_game_from_lichess_url(mock_urlopen):
+    mock_urlopen.return_value.__enter__.return_value.read.return_value = SAMPLE_PGN.encode("utf-8")
+    ret = app.lambda_handler(
+        {
+            "httpMethod": "POST",
+            "resource": "/games",
+            "body": json.dumps({"lichessUrl": "https://lichess.org/abcdefgh"}),
+        },
+        None,
+    )
+    data = json.loads(ret["body"])
+    assert ret["statusCode"] == 201
+    assert data["source"] == "lichess"
+    assert data["lichessGameId"] == "abcdefgh"
+    assert data["white"] == "Alice"
+
+
+@patch("src.app.urlopen")
+def test_lichess_not_found(mock_urlopen):
+    mock_urlopen.side_effect = HTTPError(
+        url="https://lichess.org/game/export/abcdefgh",
+        code=404,
+        msg="Not Found",
+        hdrs=None,
+        fp=None,
+    )
+    ret = app.lambda_handler(
+        {
+            "httpMethod": "POST",
+            "resource": "/games",
+            "body": json.dumps({"lichessUrl": "https://lichess.org/abcdefgh"}),
+        },
+        None,
+    )
+    assert ret["statusCode"] == 404
